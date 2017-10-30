@@ -1,0 +1,28 @@
+Library
+
+  functor CPPGrmParseFn
+  structure CPPGrmTokens
+  structure CPPLexer
+  structure Ast
+  structure AnnAst
+  structure Typing
+  structure Interp
+  structure Compile
+  structure IoBase
+
+is
+
+  $/basis.cm
+  $/smlnj-lib.cm
+  $/ml-lpt-lib.cm
+
+  cpp.grm : ml-antlr
+  cpp.lex : ml-ulex
+  ast.sml
+  ann_ast.sml
+  typing.sml
+  interp.sml
+  compile.sml
+  env.sml
+  iobase.sml
+

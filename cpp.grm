@@ -1,0 +1,283 @@
+(*  COMP 321 Homework 3:  Lexer and parser for a fragment of C.
+*
+*   ml-antlr specification.
+*
+*   N. Danner
+*   Fall 2016
+*)
+
+(*  The base of the generated structures and functors must be CPPGrm, so the
+*   parsing functor will be named CPPGrmParseFn and the token structure will be
+*   named CPPGrmTokens.
+*)
+%name CPPGrm ;
+
+%defs (
+  open Ast
+
+  datatype RatorsAndRands = Un of (exp -> exp)
+                          | Bin of (exp*exp-> exp)*exp
+                          | BinList of (exp*(exp list) -> exp)*(exp list)
+                          | Tern of (exp*exp*exp -> exp)*exp*exp
+
+  fun leftAssoc e randrs =
+    case randrs of
+         [] => e
+       | Un(rator) :: randrs => leftAssoc (rator e) randrs
+       | Bin(rator, e') :: randrs => leftAssoc (rator(e, e')) randrs
+       | BinList(rator, es') :: randrs => leftAssoc (rator(e, es')) randrs
+
+  fun rightAssoc e randrs =
+    case randrs of
+         [] => e
+       | Un(rator) :: randrs => rator (rightAssoc e randrs)
+       | Bin(rator, e') :: randrs => rator (e, rightAssoc e' randrs)
+       | Tern(rator, e0, e1) :: randrs => rator(e, e0, rightAssoc e1 randrs)
+) ;
+
+(* You are required to have a non-terminal exp, which is the starting
+*  non-terminal for expressions.  Normally ml-antlr produces only a parsing
+*  function named parse, which starts the parse with the first non-terminal for
+*  which there is a production.  This directive ensures that ml-antlr also
+*  produces a parsing function called parseexp, which attempts to derive the
+*  token sequence starting with the exp non-terminal rather than the pgm
+*  non-terminal.  Note that by having this directive, the exp non-terminal
+*  must not be the first non-terminal.
+*)
+%entry exp ;
+
+(*  You must define your tokens as part of the grammar file.  Do not define an
+*   EOF token; ml-antlr will add it to the token datatype for you.
+*)
+%tokens
+  : TINT
+  | TDBL
+  | TBOOL
+  | TSTRING
+  | TVOID
+  | ID of Ast.id
+  | INT of int
+  | DBL of real
+  | STR of string
+  | TRUE 
+  | FALSE
+  | LP 
+  | RP 
+  | LB 
+  | RB 
+  | LBRACK
+  | RBRACK
+  | SEP
+  | TERM
+  | QUESTION
+  | COLON
+  | ASSN
+  | OR
+  | AND
+  | EQ
+  | NE
+  | GT
+  | LT
+  | GE
+  | LE
+  | PLUS
+  | MINUS
+  | TIMES
+  | MOD
+  | DIV
+  | INCR
+  | DECR
+  | BANG
+  | RETURN 
+  | DO
+  | WHILE
+  | FOR
+  | IF 
+  | ELSE 
+  ;
+
+(*  The first non-terminal must yield a value of type Ast.program.
+*)
+pgm :  (* Ast.program *)
+  defn* EOF => (PDefs defn)
+  ;
+
+(*  Every definition starts with a type and an identifier, so we have to
+*   left-factor that out and then branch on what comes next.
+*)
+
+defn :  (*  Ast.def *)
+    typ ID (
+        (*  Empty parameter list and a body means a func. def'n. *)
+        LP RP LB stm* RB => (DFun(typ, ID, [], stm))
+        (*  Empty parameter list and no body means a func. prototype. *)
+      | LP RP TERM => (DFunProt(typ, ID, []))
+        (*  A parameter list means either a func. def'n or prototype. *)
+      | paramlist (LB stm* RB => (SOME stm)
+                  |TERM => (NONE)) =>
+          (case SR of NONE => DFunProt(typ, ID, map #1 paramlist)
+                    | SOME stms => DFun(typ, ID, paramlist, stms))
+        (*  A prototype list means a func. prototype.*)
+      | protolist TERM => (DFunProt(typ, ID, protolist))
+        (*  More identifiers means a declaration. *)
+    ) => (SR)
+  ;
+
+paramlist :
+    LP typ ID (SEP typ ID)* RP => ((typ, ID) :: SR)
+  ;
+
+protolist :
+    LP typ (SEP typ)* RP => (typ :: SR)
+  ;
+
+stm :  (*  Ast.stm *)
+    typ ((ID (SEP ID)* => (ID :: SR))? => 
+      (case SR of NONE => [] | SOME ids => ids)) TERM => (SDecl(typ, SR))
+  | typ (ID ASSN exp (SEP ID ASSN exp)* => ((ID, exp) :: SR)) TERM =>
+      (SInit(typ, SR))
+  | exp TERM => (SExp exp)
+  | RETURN exp TERM => (SReturn(exp))
+  | RETURN TERM => (SVReturn)
+  | DO stm WHILE LP exp RP TERM => (SDoWhile(stm, exp))
+  | WHILE LP exp RP stm => (SWhile(exp, stm))
+  | FOR LP typ ID ASSN exp TERM exp TERM exp RP stm =>
+    (SFor((typ, ID, exp1), exp2, exp3, stm))
+  | cond_stm => (cond_stm)
+  | LB stm* RB => (SBlock stm)
+  ;
+
+(*  I don't get this part at all:  ml-antlr complains that there is a left-
+*   recursion here.  But it compiles anyway and works.  I don't see where
+*   the left-recursion is.
+*)
+cond_stm :  (*  Ast.stm *)
+  (*  This rule compiles.
+  *)
+  IF LP exp RP stm (
+      ELSE stm => (SOME stm)
+    |   => (NONE)
+  ) => (case SR of NONE => SIf(exp, stm) | SOME s => SIfElse(exp, stm, s))
+
+  (*  Strangely, this rule does not compile (lookahead errors), even though it
+  *   ought to be equivalent to the one above.
+  IF LP exp RP stm (ELSE stm)?
+    => (case SR of NONE => SIf(exp, stm) | SOME s => SIfElse(exp, stm, s))
+  *)
+  ;
+
+(*  You must have a non-terminal named exp, and it must yield a value of type
+*   Ast.exp.
+*)
+exp :  (*  Ast.exp *)
+    asst_exp
+  ;
+
+(*  According to Wikipedia, assignment binds more tightly than tern. cond.
+ *  But that must be false, because x = a ? b : c should assign the value of
+ *  a ? b : c to x.
+ *  Also, assignment operators are right-associative.
+ *)
+
+asst_exp :
+    ID ASSN asst_exp => (EAsst(ID, asst_exp))
+  | cond_exp
+  ;
+
+
+cond_exp :  (*  Ast.exp *)
+    or_exp (
+        QUESTION or_exp COLON or_exp => (Tern(ECond, or_exp1, or_exp2))
+    )* => (rightAssoc or_exp SR)
+  ;
+
+
+or_exp :  (*  Ast.exp *)
+    and_exp (OR and_exp => (Bin(EOr, and_exp)))* => (leftAssoc and_exp SR)
+  ;
+
+and_exp :  (*  Ast.exp *)
+    eq_ne_exp (
+      AND eq_ne_exp => (Bin(EAnd, eq_ne_exp))
+    )* => (leftAssoc eq_ne_exp SR)
+  ;
+
+eq_ne_exp :  (*  Ast.exp *)
+    comp_exp (
+      (
+          EQ => (EEq)
+        | NE => (ENeq)
+      ) comp_exp => (Bin(SR, comp_exp))
+    )* => (leftAssoc comp_exp SR)
+  ;
+
+comp_exp :  (*  Ast.exp *)
+    plus_minus_exp (
+      (
+          LT => (ELt)
+        | LE => (ELe)
+        | GT => (EGt)
+        | GE => (EGe)
+      ) plus_minus_exp => (Bin(SR, plus_minus_exp))
+    )* => (leftAssoc plus_minus_exp SR)
+  ;
+
+plus_minus_exp :  (*  Ast.exp *)
+    times_div_mod_exp (
+      (
+          PLUS => (EAdd)
+        | MINUS => (ESub)
+      ) times_div_mod_exp => (Bin(SR, times_div_mod_exp))
+    )* => (leftAssoc times_div_mod_exp SR)
+  ;
+
+times_div_mod_exp :  (*  Ast.exp *)
+    pre_incr_decr_exp (
+      (
+          TIMES => (EMul)
+        | DIV => (EDiv)
+        | MOD => (EMod)
+      ) pre_incr_decr_exp => (Bin(SR, pre_incr_decr_exp))
+    )* => (leftAssoc pre_incr_decr_exp SR)
+  ;
+
+pre_incr_decr_exp :  (*  Ast.exp *)
+    INCR ID => (EPreIncr ID)
+  | DECR ID => (EPreDecr ID)
+  | BANG* e=post_incr_decr_call_exp => 
+      (rightAssoc e (List.tabulate(length BANG, fn _ => Un ENot)))
+  ;
+
+post_incr_decr_call_exp :
+    ID INCR => (EPostIncr ID)
+  | ID DECR => (EPostDecr ID)
+  | ID LP RP => (ECall(ID, []))
+  | ID LP (exp (SEP exp)* => (exp :: SR)) RP => (ECall(ID, SR))
+  | lit_id_exp
+  ;
+
+lit_id_exp :  (* Ast.exp *)
+    ID => (EId ID)
+    (*  This production is to handle parsing just an expression that ends with
+    *   an identifier.  For some reason the parser barfs if an identifer is
+    *   followed by EOF unless we have an explicit production for it.  What is
+    *   weird is that the parser doesn't mind an INT or DBL or any of the others
+    *   immediately followed by an EOF.
+    *)
+  | ID EOF => (EId ID)
+  | INT => (EInt INT)
+  | DBL => (EDouble DBL)
+  | STR+ => (EString (String.concat STR))
+  | TRUE => (ETrue)
+  | FALSE => (EFalse)
+  | LP exp RP => (exp)
+  ;
+
+typ:
+    TINT => ( Tint )
+  | TDBL => (Tdouble)
+  | TBOOL => (Tbool)
+  | TVOID => (Tvoid)
+  | TSTRING => (Tstring)
+  ;
+  

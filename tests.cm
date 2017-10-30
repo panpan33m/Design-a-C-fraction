@@ -1,0 +1,15 @@
+Group
+    structure Tests
+    structure UnitTest
+    structure TestRunner
+is
+    tests.sml
+	unit_test.sml
+
+	hw7.cm
+
+    $/basis.cm
+	$/smlnj-lib.cm
+  $/ml-lpt-lib.cm
+	$smlnj/compiler/compiler.cm
+	$smlnj-tdp/plugins.cm
